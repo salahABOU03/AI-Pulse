@@ -1,42 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:orientation="vertical"
-    android:padding="24dp"
-    android:gravity="center_horizontal"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:padding="16dp"
+    android:orientation="vertical">
 
-    <!-- Affichage du BPM -->
+    <!-- Affichage du BPM détecté ou simulé -->
     <TextView
-        android:id="@+id/textViewHeartRate"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="BPM: --"
+        android:id="@+id/bpmText"
+        android:text="En attente..."
         android:textSize="24sp"
-        android:layout_marginBottom="24dp" />
-
-    <!-- Bouton d’analyse -->
-    <Button
-        android:id="@+id/buttonAnalyze"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Analyser maintenant"
-        android:layout_marginBottom="24dp" />
+        android:gravity="center"
+        android:layout_marginBottom="16dp"/>
 
-    <!-- Résultat (optionnel) -->
-    <TextView
-        android:id="@+id/textViewResult"
-        android:layout_width="wrap_content"
+    <!-- Champ invisible mais utilisé pour passer la valeur au backend -->
+    <EditText
+        android:id="@+id/bpmInput"
+        android:hint="BPM détecté"
+        android:inputType="number"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Résultat : --"
-        android:textSize="18sp"
-        android:visibility="gone"
-        android:layout_marginBottom="24dp" />
+        android:enabled="false"
+        android:visibility="gone" />
+
+    <!-- Bouton Prédire -->
+    <Button
+        android:id="@+id/predictButton"
+        android:text="Prédire"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp" />
 
     <!-- Bouton Historique -->
     <Button
         android:id="@+id/historyButton"
+        android:text="Historique"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Voir l'historique" />
+        android:layout_marginTop="8dp" />
 </LinearLayout>

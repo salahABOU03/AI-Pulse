@@ -1,35 +1,48 @@
 package com.example.aipulse;
 
 import android.os.Bundle;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
 
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.aipulse.database.AppDatabase;
 import com.example.aipulse.database.DiagnosisResult;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 public class HistoryActivity extends AppCompatActivity {
 
-    RecyclerView recyclerView;
-    HistoryAdapter adapter;
+    private ListView historyList;
+    private ExecutorService executor = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_history);
 
-        recyclerView = findViewById(R.id.recyclerViewHistory);
-        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+        historyList = findViewById(R.id.historyList);
 
-        new Thread(() -> {
-            List<DiagnosisResult> results = AppDatabase.getInstance(this).resultDao().getAll();
+        executor.execute(() -> {
+            List<DiagnosisResult> results = AppDatabase.getInstance(this)
+                    .resultDao()
+                    .getAllResults();
+
+            List<String> display = results.stream()
+                    .map(r -> r.timestamp + " - BPM: " + r.bpm + " - " + r.result)
+                    .collect(Collectors.toList());
+
             runOnUiThread(() -> {
-                adapter = new HistoryAdapter(results);
-                recyclerView.setAdapter(adapter);
+                ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                        HistoryActivity.this,
+                        android.R.layout.simple_list_item_1,
+                        display
+                );
+                historyList.setAdapter(adapter);
             });
-        }).start();
+        });
     }
 }

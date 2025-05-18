@@ -1,100 +1,139 @@
 package com.example.aipulse;
 
+import android.content.Context;
 import android.content.Intent;
-import android.content.res.AssetFileDescriptor;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Bundle;
+import android.os.Handler;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import org.tensorflow.lite.Interpreter;
+import com.example.aipulse.database.AppDatabase;
+import com.example.aipulse.database.DiagnosisResult;
+import com.example.aipulse.model.Diagnosis;
+import com.example.aipulse.network.DiagnosisApiService;
+import com.example.aipulse.network.DiagnosisRequest;
+import com.example.aipulse.network.RetrofitClient;
 
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.nio.MappedByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.Random;
+import java.util.concurrent.Executors;
 
-public class MainActivity extends AppCompatActivity {
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
 
-    SensorManager sensorManager;
-    Sensor heartRateSensor;
-    TextView textViewHeartRate;
-    Button buttonAnalyze, historyButton;
-    float currentBpm = 75f;
+public class MainActivity extends AppCompatActivity implements SensorEventListener {
 
-    Interpreter tflite;
+    private SensorManager sensorManager;
+    private Sensor heartRateSensor;
+    private TextView bpmText;
+    private Button predictButton, historyButton;
+    private float lastBpm = 0f;
+    private boolean sensorAvailable = false;
+    private EditText bpmInput;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        textViewHeartRate = findViewById(R.id.textViewHeartRate);
-        buttonAnalyze = findViewById(R.id.buttonAnalyze);
-        historyButton = findViewById(R.id.historyButton); // Nouveau bouton
+        bpmText = findViewById(R.id.bpmText);
+        bpmInput = findViewById(R.id.bpmInput);
+        predictButton = findViewById(R.id.predictButton);
+        historyButton = findViewById(R.id.historyButton);
 
-        // Initialiser capteur
-        sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
+        predictButton.setEnabled(false); // Attente de lecture
+
+        // Initialisation du capteur
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         heartRateSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE);
 
         if (heartRateSensor != null) {
-            sensorManager.registerListener(sensorListener, heartRateSensor, SensorManager.SENSOR_DELAY_NORMAL);
+            sensorAvailable = true;
+            sensorManager.registerListener(this, heartRateSensor, SensorManager.SENSOR_DELAY_NORMAL);
+            bpmText.setText("En attente du capteur...");
         } else {
-            currentBpm = new Random().nextInt(40) + 60;
-            textViewHeartRate.setText("BPM simulé: " + currentBpm);
+            // Pas de capteur : simuler avec une valeur aléatoire
+            bpmText.setText("Capteur non disponible. Simulation...");
+            simulateFakeBpm();
         }
 
-        try {
-            tflite = new Interpreter(loadModelFile());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        predictButton.setOnClickListener(v -> {
+            int bpm = Integer.parseInt(bpmInput.getText().toString());
+            DiagnosisRequest request = new DiagnosisRequest(bpm);
 
-        buttonAnalyze.setOnClickListener(v -> {
-            float prediction = runModel(currentBpm);
-            Intent intent = new Intent(MainActivity.this, ResultActivity.class);
-            intent.putExtra("bpm", currentBpm);
-            intent.putExtra("result", prediction);
-            startActivity(intent);
+            DiagnosisApiService apiService = RetrofitClient.getInstance().create(DiagnosisApiService.class);
+            apiService.sendDiagnosis(request).enqueue(new Callback<Diagnosis>() {
+                @Override
+                public void onResponse(Call<Diagnosis> call, Response<Diagnosis> response) {
+                    if (response.isSuccessful() && response.body() != null) {
+                        Diagnosis diag = response.body();
+
+                        // Save to Room (thread séparé)
+                        DiagnosisResult localResult = new DiagnosisResult();
+                        localResult.bpm = diag.getBpm();
+                        localResult.risk = diag.isRisk();
+                        localResult.result = diag.getResult();
+                        localResult.timestamp = diag.getTimestamp();
+
+                        Executors.newSingleThreadExecutor().execute(() -> {
+                            AppDatabase.getInstance(MainActivity.this).resultDao().insert(localResult);
+                        });
+
+                        Intent intent = new Intent(MainActivity.this, ResultActivity.class);
+                        intent.putExtra("result", diag.getResult());
+                        intent.putExtra("risk", diag.isRisk());
+                        startActivity(intent);
+                    } else {
+                        Toast.makeText(MainActivity.this, "Erreur lors de la prédiction", Toast.LENGTH_SHORT).show();
+                    }
+                }
+
+                @Override
+                public void onFailure(Call<Diagnosis> call, Throwable t) {
+                    Toast.makeText(MainActivity.this, "Échec de la requête : " + t.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            });
         });
 
-        // Nouveau : bouton historique
-        historyButton.setOnClickListener(v -> {
-            Intent intent = new Intent(MainActivity.this, HistoryActivity.class);
-            startActivity(intent);
-        });
+        historyButton.setOnClickListener(v -> startActivity(new Intent(this, HistoryActivity.class)));
     }
 
-    SensorEventListener sensorListener = new SensorEventListener() {
-        @Override
-        public void onSensorChanged(SensorEvent event) {
-            currentBpm = event.values[0];
-            textViewHeartRate.setText("BPM: " + currentBpm);
+    private void simulateFakeBpm() {
+        new Handler().postDelayed(() -> {
+            Random rand = new Random();
+            lastBpm = 60 + rand.nextInt(40); // Valeur entre 60 et 100
+            bpmText.setText("BPM simulé : " + (int) lastBpm);
+            bpmInput.setText(String.valueOf((int) lastBpm));
+            predictButton.setEnabled(true);
+        }, 3000); // 3 secondes de "délai"
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        if (event.sensor.getType() == Sensor.TYPE_HEART_RATE) {
+            lastBpm = event.values[0];
+            bpmText.setText("BPM détecté : " + (int) lastBpm);
+            bpmInput.setText(String.valueOf((int) lastBpm));
+            predictButton.setEnabled(true);
         }
-
-        @Override
-        public void onAccuracyChanged(Sensor sensor, int accuracy) {}
-    };
-
-    private MappedByteBuffer loadModelFile() throws IOException {
-        AssetFileDescriptor fileDescriptor = this.getAssets().openFd("heart_model.tflite");
-        FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
-        FileChannel fileChannel = inputStream.getChannel();
-        long startOffset = fileDescriptor.getStartOffset();
-        long declaredLength = fileDescriptor.getDeclaredLength();
-        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
     }
 
-    private float runModel(float inputVal) {
-        float[][] input = {{inputVal}};
-        float[][] output = new float[1][1];
-        tflite.run(input, output);
-        return output[0][0];
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (sensorAvailable) {
+            sensorManager.unregisterListener(this);
+        }
     }
 }
